@@ -8,6 +8,7 @@ from utils.windModel import Wind
 import utils
 import config
 from open_loop_controller import OpenLoopController
+from mppi_controller import MppiController
 
 def sim_step(t, Ts, quad, ctrl, wind):
     quad.update(t, Ts, ctrl.w_cmd, wind)
@@ -23,11 +24,11 @@ def main():
     # Set simulation variables
     Ti = 0    # Time initial
     Ts = 0.005 # Time steps
-    Tf = 2   # Time final
+    Tf = 5   # Time final
     
     quad = Quadcopter(Ti)
-    ctrl = OpenLoopController(quad)
-    wind = Wind('None', 2.0, 90, -15)
+    ctrl = MppiController(quad)#OpenLoopController(quad)
+    wind = Wind('NONE', 2.0, 90, -15) #'NONE'
 
     # Initialize values to track for visualization
     numTimeStep = int(Tf/Ts+1)
@@ -81,6 +82,7 @@ def main():
         tor_all[i,:]         = quad.tor
 
         print("QUAD POSE: ", quad.pos)
+        #print("QUAD STATE: ", quad.state)
 
         i += 1
 

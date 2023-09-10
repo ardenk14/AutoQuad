@@ -3,6 +3,8 @@ import numpy as np
 class Controller:
     
     def __init__(self, quad):#, yawType):
+        self.quad = quad
+
         self.rad2deg = 180.0/np.pi
         self.deg2rad = np.pi/180.0
 
@@ -40,5 +42,5 @@ class Controller:
         self.pqr_sp    = np.zeros(3)
         self.yawFF     = np.zeros(3)
 
-    def control(self, quad, sDes, Ts):
+    def control(self, sDes, Ts):
         pass
