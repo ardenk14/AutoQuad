@@ -7,8 +7,8 @@ from quadFiles.quad import Quadcopter
 from utils.windModel import Wind
 import utils
 import config
-from open_loop_controller import OpenLoopController
-from mppi_controller import MppiController
+from controllers.open_loop_controller import OpenLoopController
+from controllers.mppi_controller import MppiController
 
 def sim_step(t, Ts, quad, ctrl, wind):
     quad.update(t, Ts, ctrl.w_cmd, wind)
@@ -21,10 +21,11 @@ def sim_step(t, Ts, quad, ctrl, wind):
     return t
 
 def main():
+    # ACTIONS: 0: front left, 1: front right, 2: back right, 3: back left
     # Set simulation variables
     Ti = 0    # Time initial
     Ts = 0.005 # Time steps
-    Tf = 5   # Time final
+    Tf = 3   # Time final
     
     quad = Quadcopter(Ti)
     ctrl = MppiController(quad)#OpenLoopController(quad)
