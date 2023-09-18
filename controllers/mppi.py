@@ -318,6 +318,18 @@ class MPPI():
         self.cost_total, self.states, self.actions = self._compute_rollout_costs(self.perturbed_action)
         self.actions /= self.u_scale
 
+        print("STATES SHAPE: ", self.states.shape)
+        vals, indxs = torch.topk(self.cost_total, 1)
+        vals2, indxs2 = torch.topk(self.cost_total, 1, largest=False)
+        print("BEST STATE: ", self.states[0, indxs2])
+        print("BEST ACTION: ", self.actions[0, indxs2])
+        self.best_action = self.actions[0, indxs2]
+        print("WORST STATE: ", self.states[0, indxs])
+        print("WORST ACTION: ", self.actions[0, indxs])
+        print("BEST COST: ", torch.min(self.cost_total))
+        print("WORST COST: ", torch.max(self.cost_total))
+        self.cost_total[indxs] = 0.000001
+
         # action perturbation cost
         perturbation_cost = torch.sum(self.U * action_cost, dim=(1, 2))
         self.cost_total += perturbation_cost

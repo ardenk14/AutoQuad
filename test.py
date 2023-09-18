@@ -9,6 +9,7 @@ import utils
 import config
 from controllers.open_loop_controller import OpenLoopController
 from controllers.mppi_controller import MppiController
+from controllers.pid_controller import PidController
 
 def sim_step(t, Ts, quad, ctrl, wind):
     quad.update(t, Ts, ctrl.w_cmd, wind)
@@ -28,7 +29,7 @@ def main():
     Tf = 3   # Time final
     
     quad = Quadcopter(Ti)
-    ctrl = MppiController(quad)#OpenLoopController(quad)
+    ctrl = PidController(quad)#MppiController(quad)#OpenLoopController(quad)
     wind = Wind('NONE', 2.0, 90, -15) #'NONE'
 
     # Initialize values to track for visualization

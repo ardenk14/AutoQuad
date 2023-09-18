@@ -1,12 +1,26 @@
+# -*- coding: utf-8 -*-
+"""
+author: John Bass
+email: john.bobzwik@gmail.com
+license: MIT
+Please feel free to use and modify this, but keep the above information. Thanks!
+"""
+
+# Position and Velocity Control based on https://github.com/PX4/Firmware/blob/master/src/modules/mc_pos_control/PositionControl.cpp
+# Desired Thrust to Desired Attitude based on https://github.com/PX4/Firmware/blob/master/src/modules/mc_pos_control/Utility/ControlMath.cpp
+# Attitude Control based on https://github.com/PX4/Firmware/blob/master/src/modules/mc_att_control/AttitudeControl/AttitudeControl.cpp
+# and https://www.research-collection.ethz.ch/bitstream/handle/20.500.11850/154099/eth-7387-01.pdf
+# Rate Control based on https://github.com/PX4/Firmware/blob/master/src/modules/mc_att_control/mc_att_control_main.cpp
+
 import numpy as np
+from numpy import pi
+from numpy import sin, cos, tan, sqrt
 from numpy.linalg import norm
-from controllers.controller import Controller
 import utils
 import config
-from controllers.pid import pid_controller
 
-rad2deg = 180.0/np.pi
-deg2rad = np.pi/180.0
+rad2deg = 180.0/pi
+deg2rad = pi/180.0
 
 # Set PID Gains and Max Values
 # ---------------------------
@@ -56,8 +70,7 @@ Dr = 0.1
 rate_P_gain = np.array([Pp, Pq, Pr])
 rate_D_gain = np.array([Dp, Dq, Dr])
 
-saturateVel_separetely = False
-
+# Max Velocities
 uMax = 5.0
 vMax = 5.0
 wMax = 5.0
@@ -77,16 +90,15 @@ rMax = 150.0*deg2rad
 
 rateMax = np.array([pMax, qMax, rMax])
 
-class PidController(Controller):
 
-    def __init__(self, quad):#, yawType):
-        super().__init__(quad)#, yawType)
-        self.quad = quad
+class Control:
+    
+    def __init__(self, quad, yawType):
         self.sDesCalc = np.zeros(16)
         self.w_cmd = np.ones(4)*quad.params["w_hover"]
         self.thr_int = np.zeros(3)
-        #if (yawType == 0):
-        #    att_P_gain[2] = 0
+        if (yawType == 0):
+            att_P_gain[2] = 0
         self.setYawWeight()
         self.pos_sp    = np.zeros(3)
         self.vel_sp    = np.zeros(3)
@@ -96,35 +108,45 @@ class PidController(Controller):
         self.pqr_sp    = np.zeros(3)
         self.yawFF     = np.zeros(3)
 
-        self.z_pos_controller = pid_controller(pos_P_gain[2], 0, 0)
-        self.xy_pos_controller = pid_controller(pos_P_gain[0:2], 0, 0)
-        self.z_vel_controller = pid_controller(vel_P_gain[2], 0, vel_D_gain[2])
-        self.xy_vel_controller = pid_controller(vel_P_gain[0:2], 0, vel_D_gain[0:2])
+    
+    def controller(self, traj, quad, sDes, Ts):
 
-    def control(self, quad, sDes, Ts):
         # Desired State (Create a copy, hence the [:])
         # ---------------------------
-        self.target_state = np.array([  5.,           -2.,          -2.,          1.,           0.,
-                                        0.,           0.,           0.,           0.,           0.,
-                                        0.,           0.,           0.,         522.98471407,   0.,
-                                        522.98471407,   0.,         522.98471407,   0.,         522.98471407,
-                                        0.        ], dtype=np.float32)
-        self.pos_sp[:]    = self.target_state[0:3]#traj.sDes[0:3]
-        self.vel_sp[:]    = self.target_state[3:6]#traj.sDes[3:6]
-        self.acc_sp[:]    = self.target_state[6:9]#traj.sDes[6:9]
-        self.thrust_sp[:] = self.target_state[9:12]#traj.sDes[9:12]
-        self.eul_sp[:]    = self.target_state[12:15]#traj.sDes[12:15]
-        self.pqr_sp[:]    = self.target_state[15:18]#traj.sDes[15:18]
-        self.yawFF[:]     = self.target_state[18:]#traj.sDes[18]
-
-        self.z_pos_control(quad, Ts)
-        self.xy_pos_control(quad, Ts)
-        self.saturateVel()
-        self.z_vel_control(quad, Ts)
-        self.xy_vel_control(quad, Ts)
-        self.thrustToAttitude(quad, Ts)
-        self.attitude_control(quad, Ts)
-        self.rate_control(quad, Ts)
+        self.pos_sp[:]    = traj.sDes[0:3]
+        self.vel_sp[:]    = traj.sDes[3:6]
+        self.acc_sp[:]    = traj.sDes[6:9]
+        self.thrust_sp[:] = traj.sDes[9:12]
+        self.eul_sp[:]    = traj.sDes[12:15]
+        self.pqr_sp[:]    = traj.sDes[15:18]
+        self.yawFF[:]     = traj.sDes[18]
+        
+        # Select Controller
+        # ---------------------------
+        if (traj.ctrlType == "xyz_vel"):
+            self.saturateVel()
+            self.z_vel_control(quad, Ts)
+            self.xy_vel_control(quad, Ts)
+            self.thrustToAttitude(quad, Ts)
+            self.attitude_control(quad, Ts)
+            self.rate_control(quad, Ts)
+        elif (traj.ctrlType == "xy_vel_z_pos"):
+            self.z_pos_control(quad, Ts)
+            self.saturateVel()
+            self.z_vel_control(quad, Ts)
+            self.xy_vel_control(quad, Ts)
+            self.thrustToAttitude(quad, Ts)
+            self.attitude_control(quad, Ts)
+            self.rate_control(quad, Ts)
+        elif (traj.ctrlType == "xyz_pos"): # This one
+            self.z_pos_control(quad, Ts)
+            self.xy_pos_control(quad, Ts)
+            self.saturateVel()
+            self.z_vel_control(quad, Ts)
+            self.xy_vel_control(quad, Ts)
+            self.thrustToAttitude(quad, Ts)
+            self.attitude_control(quad, Ts)
+            self.rate_control(quad, Ts)
 
         # Mixer
         # --------------------------- 
@@ -140,14 +162,26 @@ class PidController(Controller):
 
 
     def z_pos_control(self, quad, Ts):
-        self.vel_sp[2] = self.z_pos_controller.update_control(self.pos_sp[2], quad.pos[2])
+       
+        # Z Position Control
+        # --------------------------- 
+        pos_z_error = self.pos_sp[2] - quad.pos[2]
+        self.vel_sp[2] += pos_P_gain[2]*pos_z_error
         
     
     def xy_pos_control(self, quad, Ts):
-        self.vel_sp[0:2] = self.xy_pos_controller.update_control(self.pos_sp[0:2], quad.pos[0:2]) 
+
+        # XY Position Control
+        # --------------------------- 
+        pos_xy_error = (self.pos_sp[0:2] - quad.pos[0:2])
+        self.vel_sp[0:2] += pos_P_gain[0:2]*pos_xy_error
         
         
     def saturateVel(self):
+
+        # Saturate Velocity Setpoint
+        # --------------------------- 
+        # Either saturate each velocity axis separately, or total velocity (prefered)
         if (saturateVel_separetely):
             self.vel_sp = np.clip(self.vel_sp, -velMax, velMax)
         else:
@@ -157,13 +191,25 @@ class PidController(Controller):
 
 
     def z_vel_control(self, quad, Ts):
-        thrust_z_sp = self.z_pos_controller.update_control(self.vel_sp[2], quad.vel[2]) + quad.params["mB"]*(self.acc_sp[2] - quad.params["g"]) + self.thr_int[2]
-
-        vel_z_error = self.vel_sp[2] - quad.vel[2]
         
-        # The Thrust limits are negated and swapped due to NED-frame
-        uMax = -quad.params["minThr"]
-        uMin = -quad.params["maxThr"]
+        # Z Velocity Control (Thrust in D-direction)
+        # ---------------------------
+        # Hover thrust (m*g) is sent as a Feed-Forward term, in order to 
+        # allow hover when the position and velocity error are nul
+        vel_z_error = self.vel_sp[2] - quad.vel[2]
+        if (config.orient == "NED"):
+            thrust_z_sp = vel_P_gain[2]*vel_z_error - vel_D_gain[2]*quad.vel_dot[2] + quad.params["mB"]*(self.acc_sp[2] - quad.params["g"]) + self.thr_int[2]
+        elif (config.orient == "ENU"):
+            thrust_z_sp = vel_P_gain[2]*vel_z_error - vel_D_gain[2]*quad.vel_dot[2] + quad.params["mB"]*(self.acc_sp[2] + quad.params["g"]) + self.thr_int[2]
+        
+        # Get thrust limits
+        if (config.orient == "NED"):
+            # The Thrust limits are negated and swapped due to NED-frame
+            uMax = -quad.params["minThr"]
+            uMin = -quad.params["maxThr"]
+        elif (config.orient == "ENU"):
+            uMax = quad.params["maxThr"]
+            uMin = quad.params["minThr"]
 
         # Apply Anti-Windup in D-direction
         stop_int_D = (thrust_z_sp >= uMax and vel_z_error >= 0.0) or (thrust_z_sp <= uMin and vel_z_error <= 0.0)
@@ -179,12 +225,15 @@ class PidController(Controller):
 
     
     def xy_vel_control(self, quad, Ts):
+        
+        # XY Velocity Control (Thrust in NE-direction)
+        # ---------------------------
         vel_xy_error = self.vel_sp[0:2] - quad.vel[0:2]
-        thrust_xy_sp = self.xy_vel_controller.update_control(self.vel_sp[0:2], quad.vel[0:2])
+        thrust_xy_sp = vel_P_gain[0:2]*vel_xy_error - vel_D_gain[0:2]*quad.vel_dot[0:2] + quad.params["mB"]*(self.acc_sp[0:2]) + self.thr_int[0:2]
 
         # Max allowed thrust in NE based on tilt and excess thrust
         thrust_max_xy_tilt = abs(self.thrust_sp[2])*np.tan(tiltMax)
-        thrust_max_xy = np.sqrt(quad.params["maxThr"]**2 - self.thrust_sp[2]**2)
+        thrust_max_xy = sqrt(quad.params["maxThr"]**2 - self.thrust_sp[2]**2)
         thrust_max_xy = min(thrust_max_xy, thrust_max_xy_tilt)
 
         # Saturate thrust in NE-direction
@@ -200,6 +249,9 @@ class PidController(Controller):
         self.thr_int[0:2] += vel_I_gain[0:2]*vel_err_lim*Ts * quad.params["useIntergral"]
     
     def thrustToAttitude(self, quad, Ts):
+        
+        # Create Full Desired Quaternion Based on Thrust Setpoint and Desired Yaw Angle
+        # ---------------------------
         yaw_sp = self.eul_sp[2]
 
         # Desired body_z axis direction
@@ -208,7 +260,7 @@ class PidController(Controller):
             body_z = -body_z
         
         # Vector of desired Yaw direction in XY plane, rotated by pi/2 (fake body_y axis)
-        y_C = np.array([-np.sin(yaw_sp), np.cos(yaw_sp), 0.0])
+        y_C = np.array([-sin(yaw_sp), cos(yaw_sp), 0.0])
         
         # Desired body_x axis direction
         body_x = np.cross(y_C, body_z)
@@ -234,7 +286,7 @@ class PidController(Controller):
 
         # Quaternion error between the 2 vectors
         qe_red = np.zeros(4)
-        qe_red[0] = np.dot(e_z, e_z_d) + np.sqrt(norm(e_z)**2 * norm(e_z_d)**2)
+        qe_red[0] = np.dot(e_z, e_z_d) + sqrt(norm(e_z)**2 * norm(e_z_d)**2)
         qe_red[1:4] = np.cross(e_z, e_z_d)
         qe_red = utils.vectNormalize(qe_red)
         
@@ -246,7 +298,7 @@ class PidController(Controller):
         q_mix = q_mix*np.sign(q_mix[0])
         q_mix[0] = np.clip(q_mix[0], -1.0, 1.0)
         q_mix[3] = np.clip(q_mix[3], -1.0, 1.0)
-        self.qd = utils.quatMultiply(self.qd_red, np.array([np.cos(self.yaw_w*np.arccos(q_mix[0])), 0, 0, np.sin(self.yaw_w*np.arcsin(q_mix[3]))]))
+        self.qd = utils.quatMultiply(self.qd_red, np.array([cos(self.yaw_w*np.arccos(q_mix[0])), 0, 0, sin(self.yaw_w*np.arcsin(q_mix[3]))]))
 
         # Resulting error quaternion
         self.qe = utils.quatMultiply(utils.inverse(quad.quat), self.qd)

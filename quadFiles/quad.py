@@ -79,11 +79,27 @@ class Quadcopter:
         self.tor = self.params["kTo"]*self.wMotor*self.wMotor
 
     def forward_model(self, state, cmd):
-        ts = 0.0005
+        #ts = 0.0005
+        ts = 0.005
         t = 0
-        while t <= 0.005:
-            state += (self.state_dot_batch(0, state, cmd, Wind('NONE', 2.0, 90, -15)) * ts)
-            t += ts
+        wind = Wind('NONE', 2.0, 90, -15)
+        k1 = self.state_dot_batch(0, state, cmd, wind)
+        k2_state = state + k1*ts/2
+        k2 = self.state_dot_batch(0, k2_state, cmd, wind)
+        k3_state = state + k2*ts/2
+        k3 = self.state_dot_batch(0, k3_state, cmd, wind)
+        k4_state = state + k3*ts
+        k4 = self.state_dot_batch(0, k4_state, cmd, wind)
+        state = state + ts/6 * (k1 + 2*k2 + 2*k3 + k4)
+
+        altitude = state[:, 2]
+        """for i in altitude:
+            if i < 0:
+                print('state: ', i)"""
+        #print("STATE: ", where)
+        #while t <= 0.005:
+        #    state += self.state_dot_batch(0, state, cmd, wind)
+        #    t += ts
         return state #state + (self.state_dot_batch(0, state, cmd, Wind('NONE', 2.0, 90, -15)) * 0.005)
 
     # TODO: Make a function for this that can run in batch

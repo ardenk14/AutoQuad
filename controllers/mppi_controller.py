@@ -12,14 +12,14 @@ class MppiController(Controller):
     MPPI-based flight controller
     """
 
-    def __init__(self, quad, num_samples=2000, horizon=5):
+    def __init__(self, quad, num_samples=1000, horizon=100):
         super().__init__(quad)
         #self.env = env
         # def state_dot(self, t, state, cmd, wind):
         self.model = quad.forward_model #model
         #self.target_state = np.array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], dtype=np.float32)
         #self.target_state = np.zeros(21, dtype=np.float32)
-        self.target_state = np.array([  0.,           0.,          -10.,          1.,           0.,
+        self.target_state = np.array([  0.,           0.,          -4.,          1.,           0.,
                                         0.,           0.,           0.,           0.,           0.,
                                         0.,           0.,           0.,         522.98471407,   0.,
                                         522.98471407,   0.,         522.98471407,   0.,         522.98471407,
@@ -35,6 +35,7 @@ class MppiController(Controller):
         noise_sigma = 10 * torch.eye(4)
         #noise_sigma[1, 1] = 500
         lambda_value = 0.1
+        self.u_init = u_init
 
         cost_function = self.free_flight_cost_function
         
@@ -85,7 +86,7 @@ class MppiController(Controller):
                                    [fr*fl, 1., fr*br, fr*bl],
                                    [br*fl, br*fr, 1., br*bl],
                                    [bl*fl, bl*fr, bl*br, 1.]]).float()
-        noise_sigma = noise_sigma*noise_sigma * 10 * (1 + direction_length)
+        noise_sigma = noise_sigma*noise_sigma * 30 * (1 + direction_length)
         #print("NOISE SIGMA: ", noise_sigma)
         
 
@@ -94,15 +95,17 @@ class MppiController(Controller):
         #print("LAST: ", (np.sum(self.w_cmd) / 4))
         # TODO: Add the difference in thrust based on tilt
         print("ST: ", quat_state[:, 2])
-        angle = 522.98471407 - (np.mean(self.w_cmd)) * (quat_state[:, 2]/np.linalg.norm(quat_state[:, 2]) @ np.array([0, 0, 1]))
+        motor_spds = np.hstack([state[13], state[15], state[17], state[19]])
+        angle = (np.mean(motor_spds)) * (quat_state[:, 2]/np.linalg.norm(quat_state[:, 2]) @ np.array([0, 0, 1]))
         print("up thrust: ", angle)
         # TODO: Up thrust added to end is good but need derivative to slow down props when stable
         # up_thrust - last up thrust / Ts push to zero by the time we are stable
-        up_thrust =  522.98471407 - (np.mean(self.w_cmd)) * (quat_state[:, 2]/np.linalg.norm(quat_state[:, 2]) @ np.array([0, 0, 1]))
-        control_bias = 30 * torch.tensor([fl + fl * (fr+br+bl), fr + fr*(fl+br+bl), br + br*(fl+fr+bl), bl + bl * (fl+fr+br)]).float() #+ up_thrust
+        up_thrust =  2 + 522.98471407 - angle #(np.mean(self.w_cmd)) * (quat_state[:, 2]/np.linalg.norm(quat_state[:, 2]) @ np.array([0, 0, 1]))
+        control_bias = 30 * torch.tensor([fl + fl * (fr+br+bl), fr + fr*(fl+br+bl), br + br*(fl+fr+bl), bl + bl * (fl+fr+br)]).float() + up_thrust
         print(self.free_flight_cost_function(torch.tensor([state]).float(), control_bias))
 
-        self.mppi.set_noise_dist(noise_sigma=noise_sigma, noise_mu=control_bias)
+        #self.mppi.u_init = self.u_init + control_bias
+        self.mppi.set_noise_dist(noise_sigma=noise_sigma)
 
         print("BIAS: ", self.mppi.noise_mu)
 
@@ -114,7 +117,7 @@ class MppiController(Controller):
         action = action_tensor.detach().numpy()
         print("ACTION: ", action)
         
-        self.w_cmd = action
+        self.w_cmd = action # self.mppi.best_action[0, 0].detach().numpy() #
         #return action
 
     def free_flight_cost_function(self, state, action):
@@ -130,13 +133,13 @@ class MppiController(Controller):
 
         #Q = torch.eye(state.shape[-1], device=state.device)
         Q = torch.zeros((state.shape[-1], state.shape[-1]))
-        Q[0, 0] = 2000.
-        Q[1, 1] = 2000.
+        Q[0, 0] = 1.
+        Q[1, 1] = 1.
         #Q[3, 3] = 5000.
         #Q[4, 4] = 5000.
         #Q[5, 5] = 5000.
         #Q[6, 6] = 5000.
-        Q[2, 2] = 5000.
+        Q[2, 2] = 1. #5000.
         Q_act = torch.eye(action.shape[-1])
 
         # Get angle between target state up vector and prospective state up vector
@@ -145,11 +148,17 @@ class MppiController(Controller):
         dot = torch.acos(quat_state @ target_quat.t())[:, 0]
 
         # TODO: Convert quaternion in batch to rotation matrix and find offset between up vector and z straight up and add to cost
+        #for i in state[:, 2]:
+        #    if i < 0:
+        #        print("State: ", i)
         
         #action_cost = torch.diagonal((action - self.test_action) @ Q_act @ (action - self.test_action).t())
         state_cost = torch.diagonal((state - self.target_state) @ Q @ (state - self.target_state).t())
         #print("cOST: ", cst.shape)
-        cost = state_cost + 5000*dot**2 #torch.diagonal((state - self.target_state) @ Q @ (state - self.target_state).t())
+        #print("STATE SHAPE: ", state.shape)
+        #values, indices = torch.topk(state_cost, int(state.shape[-1] / 4))
+        #state_cost[indices] = 0.1
+        cost = state_cost #+ dot**2 #torch.diagonal((state - self.target_state) @ Q @ (state - self.target_state).t())
         return cost
     
     def quaternions_to_z(self, Q):
