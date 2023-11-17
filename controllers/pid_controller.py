@@ -96,7 +96,7 @@ class PidController(Controller):
         self.pqr_sp    = np.zeros(3)
         self.yawFF     = np.zeros(3)
 
-        self.z_pos_controller = pid_controller(pos_P_gain[2], 0, 0)
+        self.z_pos_controller = pid_controller(pos_P_gain[2], 0, 0) # 1, 0, 0
         self.xy_pos_controller = pid_controller(pos_P_gain[0:2], 0, 0)
         self.z_vel_controller = pid_controller(vel_P_gain[2], 0, vel_D_gain[2])
         self.xy_vel_controller = pid_controller(vel_P_gain[0:2], 0, vel_D_gain[0:2])
@@ -104,11 +104,11 @@ class PidController(Controller):
     def control(self, quad, sDes, Ts):
         # Desired State (Create a copy, hence the [:])
         # ---------------------------
-        self.target_state = np.array([  5.,           -2.,          -2.,          1.,           0.,
-                                        0.,           0.,           0.,           0.,           0.,
-                                        0.,           0.,           0.,         522.98471407,   0.,
-                                        522.98471407,   0.,         522.98471407,   0.,         522.98471407,
-                                        0.        ], dtype=np.float32)
+        self.target_state = sDes #np.array([  3,           1.,          -3.,          1.,           0.,
+                                 #       0.,           0.,           0.,           0.,           0.,
+                                 #       0.,           0.,           0.,         522.98471407,   0.,
+                                 #       522.98471407,   0.,         522.98471407,   0.,         522.98471407,
+                                 #       0.        ], dtype=np.float32)
         self.pos_sp[:]    = self.target_state[0:3]#traj.sDes[0:3]
         self.vel_sp[:]    = self.target_state[3:6]#traj.sDes[3:6]
         self.acc_sp[:]    = self.target_state[6:9]#traj.sDes[6:9]

@@ -55,7 +55,7 @@ def sameAxisAnimation(t_all, waypoints, pos_all, quat_all, sDes_tr_all, Ts, para
     if (config.orient == "NED"):
         ax.set_ylim3d([mid_y+maxRange, mid_y-maxRange])
     elif (config.orient == "ENU"):
-        ax.set_ylim3d([mid_y-maxRange, mid_y+maxRange])
+        ax.set_ylim3d([mid_y+maxRange, mid_y-maxRange])
     ax.set_ylabel('Y')
     ax.set_zlim3d([mid_z-maxRange, mid_z+maxRange])
     ax.set_zlabel('Altitude')
@@ -142,7 +142,7 @@ def sameAxisAnimation(t_all, pos_all, quat_all, Ts, params):
     elif (config.orient == "ENU"):
         ax.set_ylim3d([mid_y-maxRange, mid_y+maxRange])
     ax.set_ylabel('Y')
-    ax.set_zlim3d([mid_z-maxRange, mid_z+maxRange])
+    ax.set_zlim3d([0, 10])#[mid_z-maxRange, mid_z+maxRange])
     ax.set_zlabel('Altitude')
 
     titleTime = ax.text2D(0.05, 0.95, "", transform=ax.transAxes)

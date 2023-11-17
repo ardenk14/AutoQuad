@@ -9,11 +9,13 @@ Please feel free to use and modify this, but keep the above information. Thanks!
 import numpy as np
 from numpy import sin, cos, tan, pi, sign
 from scipy.integrate import ode
+from scipy import signal
 
 from quadFiles.initQuad import sys_params, init_cmd, init_state
 import utils
 import config
 from utils.windModel import Wind
+import random
 import torch
 
 deg2rad = pi/180.0
@@ -29,7 +31,7 @@ class Quadcopter:
         # Command for initial stable hover
         # ---------------------------
         ini_hover = init_cmd(self.params)
-        self.params["FF"] = ini_hover[0]         # Feed-Forward Command for Hover
+        self.params["FF"] = ini_hover[0]       # Feed-Forward Command for Hover
         self.params["w_hover"] = ini_hover[1]    # Motor Speed for Hover
         self.params["thr_hover"] = ini_hover[2]  # Motor Thrust for Hover  
         self.thr = np.ones(4)*ini_hover[2]
@@ -57,6 +59,13 @@ class Quadcopter:
         # ---------------------------
         self.integrator = ode(self.state_dot).set_integrator('dopri5', first_step='0.00005', atol='10e-6', rtol='10e-6')
         self.integrator.set_initial_value(self.state, Ti)
+
+        with open('Linearization.npy', 'rb') as f:
+            self.A = np.load(f)
+            self.B = np.load(f)
+            #self.A, self.B, C, D, dt = signal.cont2discrete((self.A, self.B, 0, 0), 0.005, method='zoh')
+            #print("A: ", self.A)
+            #print("B: ", self.B)
 
 
     def extended_state(self):
@@ -104,6 +113,8 @@ class Quadcopter:
 
     # TODO: Make a function for this that can run in batch
     def state_dot_batch(self, t, state, cmd, wind):
+        state = torch.from_numpy(state)
+        cmd = torch.from_numpy(cmd)
 
         # Import Params
         # ---------------------------    
@@ -285,6 +296,7 @@ class Quadcopter:
         sdot[20] = wddotM4
 
         self.acc = sdot[7:10]"""
+        sdot = sdot.numpy()
 
         return sdot
 
@@ -367,7 +379,7 @@ class Quadcopter:
 
         # Wind Model
         # ---------------------------
-        [velW, qW1, qW2] = wind.randomWind(t)
+        [velW, qW1, qW2] = [0, 0, 0]#wind.randomWind(t)
         # velW = 0
 
         # velW = 5          # m/s
@@ -432,6 +444,8 @@ class Quadcopter:
         sdot[18] = wddotM3
         sdot[19] = wdotM4
         sdot[20] = wddotM4
+        #print("WDDOTM1: ", sdot[14])
+        #print("wM1", sdot[13])
 
         self.acc = sdot[7:10]
 
@@ -444,6 +458,9 @@ class Quadcopter:
 
         self.integrator.set_f_params(cmd, wind)
         self.state = self.integrator.integrate(t, t+Ts)
+        #self.state = self.A @ self.state + self.B @ cmd
+        #self.state = self.state + self.state_dot_batch(t, np.array([self.state]), np.array([cmd]), wind)[0] * Ts
+        #self.state = self.forward_model(np.array([self.state]), np.array([cmd]))[0]
 
         self.pos   = self.state[0:3]
         self.quat  = self.state[3:7]
@@ -456,3 +473,83 @@ class Quadcopter:
 
         self.extended_state()
         self.forces()
+
+    def get_linearized(self):
+        NUM_TRIALS = 1000
+        NUM_STATES = 20
+        NUM_ACTIONS = 1000
+        start = np.zeros((NUM_TRIALS*NUM_STATES*NUM_ACTIONS, 25))
+        end = np.zeros((NUM_TRIALS*NUM_STATES*NUM_ACTIONS, 25))
+        for b in range(NUM_TRIALS):
+            print("TRIAL: ", b)
+            start_state = np.array([  0.,           0.,          0.,          1.,           0.,
+                                            0.,           0.,           0.,           0.,           0.,
+                                            0.,           0.,           0.,         522.98471407,   0.,
+                                            522.98471407,   0.,         522.98471407,   0.,         522.98471407,
+                                            0.        ], dtype=np.float32)
+            
+            starting_states = np.zeros((NUM_STATES*NUM_ACTIONS, 25))
+            next_states = np.zeros((NUM_STATES*NUM_ACTIONS, 25))
+            for i in range(NUM_STATES):
+                #for j in range(NUM_ACTIONS):
+                #print("START STATE: ", start_state.shape)
+                #states[NUM_ACTIONS*i:NUM_ACTIONS*(i+1), :21] = start_state # Set start state as state for each
+                states = np.array([[start_state] for k in range(NUM_ACTIONS)]).reshape((NUM_ACTIONS, -1))
+                #print("STATES: ", states.shape)
+                cmds = np.array([[(random.random()-0.5)*0.5 + self.params["w_hover"] for w in range(4)] for u in range(NUM_ACTIONS)])
+                #print("CMDS: ", cmds.shape)
+                
+                new_states = self.forward_model(states, cmds)
+                #print("NEW STATES: ", new_states.shape)
+
+                starting_states[NUM_ACTIONS*i:NUM_ACTIONS*(i+1), :21] = states
+                starting_states[NUM_ACTIONS*i:NUM_ACTIONS*(i+1), 21:] = cmds
+                next_states[NUM_ACTIONS*i:NUM_ACTIONS*(i+1), :21] = new_states
+                #print("RANDOM: ", random.randint(NUM_ACTIONS*i, NUM_ACTIONS*(i+1)))
+                start_state = next_states[random.randint(NUM_ACTIONS*i, NUM_ACTIONS*(i+1)-1), :21]
+            start[NUM_STATES*NUM_ACTIONS*b:NUM_STATES*NUM_ACTIONS*(b+1)] = starting_states
+            end[NUM_STATES*NUM_ACTIONS*b:NUM_STATES*NUM_ACTIONS*(b+1)] = next_states
+
+        A, r, rank, s = np.linalg.lstsq(start, end)#(starting_states, next_states)
+        #A = np.linalg.inv(starting_states.T @ starting_states) @ starting_states.T @ next_states
+        print("A: ", A)
+        print("A: ", A.shape)
+        final_A = A.T[:21, :21]
+        final_B = A.T[:21, 21:]
+        print("FINAL B: ", final_B)
+        print("SUM OF SQUARED RESIDUALS: ", r)
+
+        with open('Linearization.npy', 'wb') as f:
+            np.save(f, final_A)
+            np.save(f, final_B)
+
+        """import sympy as sp
+
+        # Define symbolic variables for the state and control inputs
+        x = sp.symbols('x:21')  # Represents the state vector
+        u = sp.symbols('u:4')   # Represents the control input
+
+        wind = Wind('NONE', 2.0, 90, -15)
+
+        # Compute the time derivative of each element of the state vector x
+        # Replace the symbolic control inputs with specific numeric values for linearization
+        u_hover = [522.98471407, 522.98471407, 522.98471407, 522.98471407]  # Hover command
+        xdot_numeric = [self.state_dot(0, x, u_hover, 0)[i].subs(list(zip(u, u_hover))) for i in range(21)]
+
+        # Extract the elements of xdot as separate equations
+        dxdt = [sp.Eq(x[i], xdot_numeric[i]) for i in range(21)]
+
+        # Calculate the Jacobian matrices A and B
+        A = sp.Matrix([[sp.diff(eq.lhs, xj).subs(list(zip(u, u_hover))) for xj in x] for eq in dxdt])
+        B = sp.Matrix([[sp.diff(eq.lhs, ui).subs(list(zip(u, u_hover))) for ui in u] for eq in dxdt])
+
+        # Convert the symbolic matrices A and B to NumPy arrays for further processing
+        A_numeric = sp.lambdify((x,), A, modules='numpy')(u_hover)
+        B_numeric = sp.lambdify((x,), B, modules='numpy')(u_hover)
+
+        # Display the resulting A and B matrices
+        print("A matrix:")
+        print(A_numeric)
+        print("B matrix:")
+        print(B_numeric)"""
+
